@@ -154,10 +154,16 @@ function getUserProgressText(chatId) {
 
 // Start interactive download processing
 async function startTaskDownload(client, infoHash) {
+    console.log(`\x1b[36m🔍 startTaskDownload called for infoHash: ${infoHash}\x1b[0m`);
     const task = activeTasks.get(infoHash);
-    if (!task) return;
+    if (!task) {
+        console.error(`\x1b[31m❌ Task NOT found in activeTasks for infoHash: ${infoHash}!\x1b[0m`);
+        console.log("Active Tasks keys:", Array.from(activeTasks.keys()));
+        return;
+    }
     
     const { torrent, chatId, statusMsgId, taskDir, documentName, tempOutputs, replyToId } = task;
+    console.log(`\x1b[32m✔ Task found! Torrent name: ${torrent ? torrent.name : 'unknown'}\x1b[0m`);
     
     task.stage = 'downloading';
     
@@ -213,6 +219,9 @@ async function startTaskDownload(client, infoHash) {
     const progressInterval = setInterval(() => {
         updateProgress(true);
     }, 4000);
+
+    // Trigger immediately so the user instantly sees the active progress screen!
+    updateProgress(true);
     
     torrent.on('done', async () => {
         clearInterval(progressInterval);
@@ -768,57 +777,49 @@ async function startBot() {
 
     // Register Inline Keyboard Callbacks
     client.addEventHandler(async (event) => {
-        const data = event.data ? event.data.toString() : '';
-        if (!data) return;
+        try {
+            const data = event.data ? event.data.toString() : '';
+            console.log(`\x1b[35m📥 Callback received! Data: "${data}", Chat: ${event.query.userId}\x1b[0m`);
+            if (!data) return;
 
-        const chatId = event.query.userId.toString();
+            const chatId = event.query.userId.toString();
 
-        if (data.startsWith('dl_all:')) {
-            const infoHash = data.substring(7);
-            await event.answer({ message: "📥 Starting high-speed download..." });
-            startTaskDownload(client, infoHash);
-        } else if (data.startsWith('cancel:')) {
-            const infoHash = data.substring(7);
-            await event.answer({ message: "❌ Request cancelled." });
-            cancelTask(client, infoHash);
-        } else if (data === 'help') {
-            await event.answer();
-            await client.sendMessage(chatId, {
-                message: getHelpGuide(),
-                buttons: [
-                    [
-                        Button.inline("📊 System Status", Buffer.from("status")),
-                        Button.inline("📊 My Progress", Buffer.from("my_progress"))
+            if (data.startsWith('dl_all:')) {
+                const infoHash = data.substring(7);
+                console.log(`\x1b[36m⚡ 'Download & Send All' clicked for infoHash: ${infoHash}\x1b[0m`);
+                await event.answer({ message: "📥 Starting high-speed download..." });
+                await startTaskDownload(client, infoHash);
+            } else if (data.startsWith('cancel:')) {
+                const infoHash = data.substring(7);
+                console.log(`\x1b[31m❌ 'Cancel' clicked for infoHash: ${infoHash}\x1b[0m`);
+                await event.answer({ message: "❌ Request cancelled." });
+                await cancelTask(client, infoHash);
+            } else if (data === 'help') {
+                await event.answer();
+                await client.sendMessage(chatId, {
+                    message: getHelpGuide(),
+                    buttons: [
+                        [
+                            Button.inline("📊 System Status", Buffer.from("status")),
+                            Button.inline("📊 My Progress", Buffer.from("my_progress"))
+                        ]
                     ]
-                ]
-            });
-        } else if (data === 'status') {
-            await event.answer();
-            await client.sendMessage(chatId, {
-                message: getSystemStatus(),
-                buttons: [
-                    [
-                        Button.inline("📊 My Progress", Buffer.from("my_progress")),
-                        Button.inline("📖 Help Guide", Buffer.from("help"))
+                });
+            } else if (data === 'status') {
+                await event.answer();
+                await client.sendMessage(chatId, {
+                    message: getSystemStatus(),
+                    buttons: [
+                        [
+                            Button.inline("📊 My Progress", Buffer.from("my_progress")),
+                            Button.inline("📖 Help Guide", Buffer.from("help"))
+                        ]
                     ]
-                ]
-            });
-        } else if (data === 'my_progress') {
-            await event.answer();
-            await client.sendMessage(chatId, {
-                message: getUserProgressText(chatId),
-                buttons: [
-                    [
-                        Button.inline("🔄 Refresh Progress", Buffer.from("refresh_progress")),
-                        Button.inline("📖 Help Guide", Buffer.from("help"))
-                    ]
-                ]
-            });
-        } else if (data === 'refresh_progress') {
-            const progressText = getUserProgressText(chatId);
-            try {
-                await event.edit({
-                    message: progressText,
+                });
+            } else if (data === 'my_progress') {
+                await event.answer();
+                await client.sendMessage(chatId, {
+                    message: getUserProgressText(chatId),
                     buttons: [
                         [
                             Button.inline("🔄 Refresh Progress", Buffer.from("refresh_progress")),
@@ -826,10 +827,25 @@ async function startBot() {
                         ]
                     ]
                 });
-                await event.answer({ message: "🔄 Progress refreshed!" });
-            } catch (err) {
-                await event.answer({ message: "⚠️ No change in progress yet." });
+            } else if (data === 'refresh_progress') {
+                const progressText = getUserProgressText(chatId);
+                try {
+                    await event.edit({
+                        message: progressText,
+                        buttons: [
+                            [
+                                Button.inline("🔄 Refresh Progress", Buffer.from("refresh_progress")),
+                                Button.inline("📖 Help Guide", Buffer.from("help"))
+                            ]
+                        ]
+                    });
+                    await event.answer({ message: "🔄 Progress refreshed!" });
+                } catch (err) {
+                    await event.answer({ message: "⚠️ No change in progress yet." });
+                }
             }
+        } catch (callbackErr) {
+            console.error('⚠️ Error in CallbackQuery event handler:', callbackErr);
         }
     }, new CallbackQuery({}));
 }
