@@ -617,24 +617,15 @@ async function startBot() {
                 return;
             }
 
-            // Start WebTorrent client to load metadata
-            const torrentOptions = {
-                path: taskDir,
-                announce: bootstrapTrackers
-            };
+            // Pre-declare scope variables to prevent ReferenceErrors if events fire synchronously during client.add()
+            let torrent;
+            let torrentHash;
+            let metadataInterval = null;
+            let metadataHandled = false;
+            let readyHandled = false;
 
-            const torrent = torrentClient.add(torrentSource, torrentOptions);
-            const torrentHash = torrent.infoHash;
-
-            // Register metadata parsing event to deselect files immediately as soon as they are populated
-            torrent.on('metadata', () => {
-                console.log(`\x1b[35m🧲 Metadata parsed for ${torrent.name || torrentHash}. Deselecting all files to prevent background download.\x1b[0m`);
-                torrent.files.forEach(file => file.deselect());
-            });
-
-            // Track early stage with infoHash
             const initialTask = {
-                torrent,
+                torrent: null,
                 chatId,
                 statusMsgId: statusMsg.id,
                 taskDir,
@@ -645,32 +636,17 @@ async function startBot() {
                 customName: isMagnet ? 'Magnet Link' : documentName,
                 metadataInterval: null
             };
-            activeTasks.set(torrentHash, initialTask);
 
-            // Display loading screen with live peer counts & cancel button
-            let metadataAttempts = 0;
-            const metadataInterval = setInterval(async () => {
-                metadataAttempts++;
-                const peers = torrent.numPeers || 0;
-                
-                try {
-                    await client.editMessage(chatId, {
-                        message: statusMsg.id,
-                        text: `🧲 **Connecting to peers and parsing metadata...**\n\n` +
-                              `• **Connected Peers:** \`${peers}\` active\n` +
-                              `• **Time Elapsed:** \`${metadataAttempts * 4}s\`\n\n` +
-                              `_Ensure your torrent has healthy seeds if it gets stuck here!_`,
-                        buttons: [[Button.inline("❌ Cancel", Buffer.from(`cancel:${torrentHash}`))]]
-                    });
-                } catch (e) {
-                    // Ignore transient network errors during rapid polling
+            const handleMetadata = () => {
+                console.log(`\x1b[35m🧲 Metadata parsed for ${torrent.name || torrentHash}. Deselecting all files to prevent background download.\x1b[0m`);
+                torrent.files.forEach(file => file.deselect());
+            };
+
+            const handleReady = async () => {
+                if (metadataInterval) {
+                    clearInterval(metadataInterval);
+                    metadataInterval = null;
                 }
-            }, 4000);
-
-            initialTask.metadataInterval = metadataInterval;
-
-            torrent.on('ready', async () => {
-                clearInterval(metadataInterval);
                 initialTask.metadataInterval = null;
                 initialTask.stage = 'ready';
                 console.log(`\x1b[32m✔ Metadata parsed for: ${torrent.name}\x1b[0m`);
@@ -701,10 +677,39 @@ async function startBot() {
                 }).catch(err => {
                     console.error('Failed to edit with file list buttons:', err.message);
                 });
+            };
+
+            // Start WebTorrent client to load metadata
+            const torrentOptions = {
+                path: taskDir,
+                announce: bootstrapTrackers
+            };
+
+            torrent = torrentClient.add(torrentSource, torrentOptions);
+            torrentHash = torrent.infoHash;
+            initialTask.torrent = torrent;
+            activeTasks.set(torrentHash, initialTask);
+
+            // Register event listeners for asynchronous loads
+            torrent.on('metadata', () => {
+                if (!metadataHandled) {
+                    metadataHandled = true;
+                    handleMetadata();
+                }
+            });
+
+            torrent.on('ready', () => {
+                if (!readyHandled) {
+                    readyHandled = true;
+                    handleReady();
+                }
             });
 
             torrent.on('error', async (err) => {
-                clearInterval(metadataInterval);
+                if (metadataInterval) {
+                    clearInterval(metadataInterval);
+                    metadataInterval = null;
+                }
                 initialTask.metadataInterval = null;
                 console.error('WebTorrent Load Error:', err);
                 await client.editMessage(chatId, {
@@ -716,6 +721,39 @@ async function startBot() {
                 activeTasks.delete(torrentHash);
                 torrent.destroy();
             });
+
+            // Immediately check and handle if metadata / ready fired synchronously inside add()
+            if (torrent.metadata && !metadataHandled) {
+                metadataHandled = true;
+                handleMetadata();
+            }
+
+            if (torrent.ready && !readyHandled) {
+                readyHandled = true;
+                handleReady();
+            } else {
+                // Display loading screen with live peer counts & cancel button (only if not already ready)
+                let metadataAttempts = 0;
+                metadataInterval = setInterval(async () => {
+                    metadataAttempts++;
+                    const peers = torrent.numPeers || 0;
+                    
+                    try {
+                        await client.editMessage(chatId, {
+                            message: statusMsg.id,
+                            text: `🧲 **Connecting to peers and parsing metadata...**\n\n` +
+                                  `• **Connected Peers:** \`${peers}\` active\n` +
+                                  `• **Time Elapsed:** \`${metadataAttempts * 4}s\`\n\n` +
+                                  `_Ensure your torrent has healthy seeds if it gets stuck here!_`,
+                            buttons: [[Button.inline("❌ Cancel", Buffer.from(`cancel:${torrentHash}`))]]
+                        });
+                    } catch (e) {
+                        // Ignore transient network errors during rapid polling
+                    }
+                }, 4000);
+
+                initialTask.metadataInterval = metadataInterval;
+            }
 
         } catch (err) {
             console.error('General Handler Error:', err);
