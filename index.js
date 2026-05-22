@@ -178,7 +178,12 @@ async function startTaskDownload(client, infoHash) {
         await client.editMessage(chatId, {
             message: statusMsgId,
             text: `📥 **Starting download for:** \`${torrent.name}\`...\nPeers: \`${torrent.numPeers}\` active. Preparing disk storage allocation...`,
-            buttons: [[Button.inline("🔄 Refresh Progress", Buffer.from("refresh_progress"))]]
+            buttons: [
+                [
+                    Button.inline("🔄 Refresh Progress", Buffer.from("refresh_progress")),
+                    Button.inline("❌ Cancel", Buffer.from(`cancel:${infoHash}`))
+                ]
+            ]
         });
     } catch (e) {
         console.error('Failed to update status message for download start:', e.message);
@@ -207,7 +212,12 @@ async function startTaskDownload(client, infoHash) {
             client.editMessage(chatId, {
                 message: statusMsgId,
                 text: text,
-                buttons: [[Button.inline("🔄 Refresh Progress", Buffer.from("refresh_progress"))]]
+                buttons: [
+                    [
+                        Button.inline("🔄 Refresh Progress", Buffer.from("refresh_progress")),
+                        Button.inline("❌ Cancel", Buffer.from(`cancel:${infoHash}`))
+                    ]
+                ]
             }).catch(() => {});
             lastEditTime = now;
         }
@@ -219,12 +229,14 @@ async function startTaskDownload(client, infoHash) {
     const progressInterval = setInterval(() => {
         updateProgress(true);
     }, 4000);
+    task.progressInterval = progressInterval;
 
     // Trigger immediately so the user instantly sees the active progress screen!
     updateProgress(true);
     
     torrent.on('done', async () => {
         clearInterval(progressInterval);
+        task.progressInterval = null;
         console.log(`\x1b[32m✔ Torrent downloaded completely: ${torrent.name}\x1b[0m`);
         
         // Final download update
@@ -379,6 +391,7 @@ async function startTaskDownload(client, infoHash) {
 
     torrent.on('error', async (err) => {
         clearInterval(progressInterval);
+        task.progressInterval = null;
         console.error('WebTorrent Torrent Error:', err);
         await client.editMessage(chatId, {
             message: statusMsgId,
@@ -396,10 +409,13 @@ async function cancelTask(client, infoHash) {
     const task = activeTasks.get(infoHash);
     if (!task) return;
     
-    const { torrent, chatId, statusMsgId, taskDir, tempOutputs, metadataInterval } = task;
+    const { torrent, chatId, statusMsgId, taskDir, tempOutputs, metadataInterval, progressInterval } = task;
     
     if (metadataInterval) {
         clearInterval(metadataInterval);
+    }
+    if (progressInterval) {
+        clearInterval(progressInterval);
     }
     
     try {
