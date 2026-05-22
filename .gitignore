@@ -1,0 +1,25 @@
+# Node modules
+node_modules/
+
+# Local configuration and session data (CRITICAL: Never commit your .env!)
+.env
+
+# Temporary downloads and task folders
+downloads/
+task_*
+split_*
+
+# Archives and zipped folders
+*.zip
+*.rar
+*.tar.gz
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS specific files
+.DS_Store
+Thumbs.db
