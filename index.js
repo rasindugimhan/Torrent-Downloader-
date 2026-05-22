@@ -628,7 +628,7 @@ async function startBot() {
 
             // Pre-declare scope variables to prevent ReferenceErrors if events fire synchronously during client.add()
             let torrent;
-            let torrentHash;
+            let torrentHash = infoHashToCheck;
             let metadataInterval = null;
             let metadataHandled = false;
             let readyHandled = false;
@@ -695,7 +695,7 @@ async function startBot() {
             };
 
             torrent = torrentClient.add(torrentSource, torrentOptions);
-            torrentHash = torrent.infoHash;
+            torrentHash = torrent.infoHash || torrentHash || infoHashToCheck;
             initialTask.torrent = torrent;
             activeTasks.set(torrentHash, initialTask);
 
